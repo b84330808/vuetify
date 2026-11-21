@@ -272,4 +272,24 @@ describe('VDataTable - sorting', () => {
       { string: 'foobarbuzz', number: '' },
     ])
   })
+
+  it('should sort dates chronologically and use the next key for equal dates', () => {
+    const items = transformItems([
+      { name: 'b', date: new Date(2024, 0, 2) },
+      { name: 'c', date: new Date(2023, 11, 31) },
+      { name: 'e', date: new Date(2024, 0, 5) },
+      { name: 'a', date: new Date(2024, 0, 2) },
+      { name: 'd', date: new Date(2024, 0, 10) },
+    ])
+
+    expect(
+      sortItems(items, [{ key: 'date', order: 'asc' }, { key: 'name', order: 'asc' }])
+        .map(i => i.raw.name)
+    ).toStrictEqual(['c', 'a', 'b', 'e', 'd'])
+
+    expect(
+      sortItems(items, [{ key: 'date', order: 'desc' }, { key: 'name', order: 'asc' }])
+        .map(i => i.raw.name)
+    ).toStrictEqual(['d', 'e', 'a', 'b', 'c'])
+  })
 })

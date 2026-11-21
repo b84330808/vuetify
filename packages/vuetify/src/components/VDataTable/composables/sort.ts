@@ -4,7 +4,7 @@ import { useProxiedModel } from '@/composables/proxiedModel'
 
 // Utilities
 import { computed, inject, provide, toRef } from 'vue'
-import { getObjectValueByPath, isEmpty, isObject, propsFactory } from '@/util'
+import { getObjectValueByPath, isEmpty, isNullOrUndefined, isObject, propsFactory } from '@/util'
 
 // Types
 import type { InjectionKey, PropType, Ref } from 'vue'
@@ -184,9 +184,12 @@ export function sortItems<T extends InternalItem> (
 ): T[] {
   const stringCollator = new Intl.Collator(locale, { sensitivity: 'accent', usage: 'sort' })
 
-  const transformedItems = items.map(item => (
-    [item, options?.transform ? options.transform(item) : item as never] as const)
-  )
+  const transformedItems = items.map(item => {
+    const transformed = options?.transform ? options.transform(item) : item as never
+    const values = sortByItems.map(({ key }) => getObjectValueByPath(transformed, key))
+
+    return { item, values, sortValues: values.map(toSortValue) }
+  })
 
   return transformedItems.sort((a, b) => {
     for (let i = 0; i < sortByItems.length; i++) {
@@ -196,18 +199,11 @@ export function sortItems<T extends InternalItem> (
 
       if (sortOrder === false) continue
 
-      let sortA = getObjectValueByPath(a[1], sortKey)
-      let sortB = getObjectValueByPath(b[1], sortKey)
-      let sortARaw = a[0].raw
-      let sortBRaw = b[0].raw
-
-      if (sortOrder === 'desc') {
-        [sortA, sortB] = [sortB, sortA]
-        ;[sortARaw, sortBRaw] = [sortBRaw, sortARaw]
-      }
+      const first = sortOrder === 'desc' ? b : a
+      const second = sortOrder === 'desc' ? a : b
 
       if (options?.sortRawFunctions?.[sortKey]) {
-        const customResult = options.sortRawFunctions[sortKey](sortARaw, sortBRaw)
+        const customResult = options.sortRawFunctions[sortKey](first.item.raw, second.item.raw)
 
         if (customResult == null) continue
         hasCustomResult = true
@@ -215,7 +211,7 @@ export function sortItems<T extends InternalItem> (
       }
 
       if (options?.sortFunctions?.[sortKey]) {
-        const customResult = options.sortFunctions[sortKey](sortA, sortB)
+        const customResult = options.sortFunctions[sortKey](first.values[i], second.values[i])
 
         if (customResult == null) continue
         hasCustomResult = true
@@ -224,23 +220,42 @@ export function sortItems<T extends InternalItem> (
 
       if (hasCustomResult) continue
 
+      let sortA = first.sortValues[i]
+      let sortB = second.sortValues[i]
+
       // Dates should be compared numerically
-      if (sortA instanceof Date && sortB instanceof Date) {
-        sortA = sortA.getTime()
-        sortB = sortB.getTime()
+      if (sortA.time && sortB.time) {
+        sortA = sortA.time
+        sortB = sortB.time
       }
 
-      [sortA, sortB] = [sortA, sortB].map(s => s != null ? s.toString().toLocaleLowerCase() : s)
-
-      if (sortA !== sortB) {
-        if (isEmpty(sortA) && isEmpty(sortB)) return 0
-        if (isEmpty(sortA)) return -1
-        if (isEmpty(sortB)) return 1
-        if (!isNaN(sortA) && !isNaN(sortB)) return Number(sortA) - Number(sortB)
-        return stringCollator.compare(sortA, sortB)
+      if (sortA.text !== sortB.text) {
+        if (sortA.empty && sortB.empty) return 0
+        if (sortA.empty) return -1
+        if (sortB.empty) return 1
+        if (!isNaN(sortA.number) && !isNaN(sortB.number)) return sortA.number - sortB.number
+        return stringCollator.compare(sortA.text, sortB.text)
       }
     }
 
     return 0
-  }).map(([item]) => item)
+  }).map(({ item }) => item)
+}
+
+type SortValue = {
+  text: any
+  empty: boolean
+  number: number
+  time?: SortValue
+}
+
+function toSortValue (value: any): SortValue {
+  const text = isNullOrUndefined(value) ? value : value.toString().toLocaleLowerCase()
+
+  return {
+    text,
+    empty: isEmpty(text),
+    number: Number(text),
+    time: value instanceof Date ? toSortValue(value.getTime()) : undefined,
+  }
 }
